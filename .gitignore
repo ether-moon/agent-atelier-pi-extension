@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+
+# Pi runtime
+.pi/
+
+# Agent-atelier runtime state
+.agent-atelier/
+
+# Logs
+*.log
