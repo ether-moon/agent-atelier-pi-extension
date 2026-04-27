@@ -21,5 +21,8 @@ build/
 # Agent-atelier runtime state
 .agent-atelier/
 
+# Package artifacts
+*.tgz
+
 # Logs
 *.log

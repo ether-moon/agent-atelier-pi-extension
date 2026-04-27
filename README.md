@@ -2,13 +2,13 @@
 
 A port of [agent-atelier](https://github.com/ether-moon/agent-atelier) — an autonomous product development loop with a multi-agent team — to a [pi-coding-agent](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) extension.
 
-> **Status:** Design phase. No code yet. See [`docs/design.md`](docs/design.md), [`docs/mapping.md`](docs/mapping.md), and [`docs/roadmap.md`](docs/roadmap.md).
+> **Status:** Initial extension implementation is underway. Scaffold, mirrored upstream assets, state commands, safety events, bundled subagent dispatch, and the plan-mode agent shell are present. See [`docs/plan.md`](docs/plan.md) for the full v1 plan.
 
 ## What this is
 
 agent-atelier is a Claude Code plugin that drives a fixed team of subagents (PM, Architect, Builder, VRM, QA, UX, State-Manager) through a state machine — `DISCOVER → BUILD_PLAN → IMPLEMENT → CANDIDATE_VALIDATE → REVIEW → DONE` — with explicit gates for human decisions. It maintains its own runtime state in `.agent-atelier/` and uses a sole-writer `state-commit` script for atomic multi-file writes.
 
-This repository is the design and (eventually) implementation of the same loop as a pi-coding-agent extension. The goal is to keep the orchestration model and operational artifacts identical while adapting the surrounding mechanisms (skills, hooks, native task integration) to pi's API surface.
+This repository is the implementation of the same loop as a pi-coding-agent extension. The goal is to keep the orchestration model and operational artifacts identical while adapting the surrounding mechanisms (skills, hooks, native task integration) to pi's API surface.
 
 ## Why pi
 
@@ -37,7 +37,24 @@ pi exposes a richer set of orchestration primitives than what agent-atelier curr
 
 ## Roadmap
 
-See [`docs/roadmap.md`](docs/roadmap.md) for the phased plan. The current scope of this repository is **design documentation only** — implementation will follow once the design is reviewed.
+See [`docs/plan.md`](docs/plan.md) for the phased implementation plan (Phases 1–6, file-by-file).
+
+## Local Development
+
+```bash
+npm install
+npm test
+npx pi -e ./src/index.ts
+```
+
+## Install From Clone
+
+```bash
+mkdir -p ~/.pi/agent/extensions/agent-atelier
+ln -sf "$(pwd)/src/index.ts" ~/.pi/agent/extensions/agent-atelier/index.ts
+```
+
+The extension loads bundled `agents/`, `prompts/`, `scripts/`, `schema/`, and `references/` relative to this repository checkout.
 
 ## License
 

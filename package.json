@@ -1,0 +1,39 @@
+{
+  "name": "agent-atelier-pi-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "agent-atelier orchestration loop ported to a pi-coding-agent extension",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bash tests/all.sh"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "0.70.0"
+  },
+  "dependencies": {
+    "@mariozechner/pi-agent-core": "0.70.0",
+    "@mariozechner/pi-ai": "0.70.0",
+    "@mariozechner/pi-tui": "0.70.0",
+    "typebox": "1.1.24"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  },
+  "agentAtelier": {
+    "testedPiCommit": "2a7e82d3ef5ff887a0de1334bad26faf9ce73def"
+  }
+}
