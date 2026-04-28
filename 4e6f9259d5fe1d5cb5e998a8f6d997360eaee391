@@ -1,0 +1,27 @@
+## Decisions Made
+- Pinned plugin to a specific SHA over floating @main: supply-chain risk on a workflow with contents:write and live API keys.
+- Used jq -n --arg over heredoc for .mcp.json: JSON-escapes secrets containing quotes or backslashes.
+- Pull-then-rm in the cleanup step over --autostash: more idiomatic, no hidden state.
+- Set concurrency cancel-in-progress: false: queueing is safer than cancelling in-flight vault.db applies.
+- Dropped Agent(*) only from mark-evidence: it is read-only, but batch-refine and curate-report may need subagents.
+
+## Problems Encountered
+- Original cleanup step ran git pull --rebase against staged deletions, which aborts rebase: resolved by moving pull before git rm.
+- Original heredoc embedded GitHub Actions secret expressions directly in JSON, which would break if a secret contained a quote or backslash: resolved by switching to jq -n with secrets passed through env vars. Verified with a dummy Notion key containing embedded quotes.
+
+## Constraints Identified
+- Plugin SHA pin policy is now manual: future bumps require updating all four workflows in lockstep, no automation in place.
+- fetch-depth set to 0 left unchanged in mark-evidence and curate-report: cannot safely reduce without auditing how the corresponding skills walk git history.
+
+## Open Questions
+- When and how often should the plugin SHA pin be bumped? No bot or process configured yet.
+- What is the minimum allowedTools set each KD skill actually needs? claude_args could not be tightened further without a skill-side audit.
+
+## Context
+Reviewed PR #2 (Knowledge Distillery pipeline setup) and applied all defensible fixes from the review across the four workflow files: script-injection hardening via env vars, plugin SHA pin, concurrency guard on vault.db updates, jq-based .mcp.json builder, rebase ordering fix, and read-only workflow tool tightening. YAML syntax validated locally; jq output verified with a quote-containing dummy secret.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
