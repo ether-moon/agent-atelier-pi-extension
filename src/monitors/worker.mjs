@@ -85,7 +85,12 @@ function eventTail() {
   }
   if (size !== lastEventSize) {
     appendEvent("event_log_advanced", { monitor: name, previous_size: lastEventSize, current_size: size });
-    lastEventSize = size;
+    // Re-stat after append so we don't treat our own write as a new external change.
+    try {
+      lastEventSize = fs.statSync(eventsPath).size;
+    } catch {
+      lastEventSize = size;
+    }
   }
 }
 
