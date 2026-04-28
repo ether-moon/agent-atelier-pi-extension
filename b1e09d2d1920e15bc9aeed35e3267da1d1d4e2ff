@@ -1,0 +1,23 @@
+## Decisions Made
+- Layer destructive checks ahead of broad SAFE matchers: rather than narrowing `^\s*curl\s/` and `^\s*find\b`, add precise destructive entries so `isSafeCommand` rejects them via the existing `!DESTRUCTIVE_PATTERNS.some(...)` guard. Keeps the diff localized and preserves benign `curl`/`find` usage.
+- Cover `wget -O <file>` explicitly while keeping `wget -O -` (stdout) safe, matching CodeRabbit's intent without breaking the existing SAFE pattern at line 84.
+- Block all common shell pipelines (`| bash|sh|zsh|fish`), not just `| sh`, to avoid trivial alias bypasses.
+
+## Problems Encountered
+- CodeRabbit's suggested patch tightened `SAFE_PATTERNS` for `curl`, but doing so risked false positives on benign `curl -s ...` flows used by Knowledge Distillery scripts. Resolved by hardening `DESTRUCTIVE_PATTERNS` instead — same effect, smaller blast radius.
+
+## Constraints Identified
+- `isSafeCommand` evaluates DESTRUCTIVE_PATTERNS first, so adding entries there is sufficient and does not require touching SAFE_PATTERNS.
+- The companion `src/lib/destructiveCommands.ts` is a separate, more authoritative blocklist with its own test suite; this file is a lighter read-only policy and shares no patterns with it.
+
+## Open Questions
+- None
+
+## Context
+Resolved CodeRabbit critical thread on `src/lib/safeBash.ts` (PR #1) by adding five new DESTRUCTIVE_PATTERNS that close `find -delete`, `find -exec rm`, `curl -o/--output <file>`, shell-pipe execution, and `wget -O <file>` bypasses. Verified with an inline node check that the eight attack strings are blocked while six benign forms remain allowed; `npm test` and `npm run typecheck` pass.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
