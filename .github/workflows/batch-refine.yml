@@ -1,0 +1,124 @@
+name: Knowledge Distillery — Batch Refine
+
+on:
+  schedule:
+    - cron: '0 9 * * 1'  # Every Monday 09:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: knowledge-batch-refine
+  cancel-in-progress: false
+
+jobs:
+  collect-and-refine:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Checkout Knowledge Distillery plugin
+        uses: actions/checkout@v6
+        with:
+          repository: ether-moon/knowledge-distillery
+          ref: 5b7981d3a2d904b16f15e9ac2ca68c8d48aebee1  # main as of 2026-04-28
+          path: .knowledge-distillery-plugin
+
+      - name: Write dynamic MCP config
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          SLACK_API_KEY: ${{ secrets.SLACK_API_KEY }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+        run: |
+          if [ -n "$LINEAR_API_KEY" ]; then echo "::add-mask::$LINEAR_API_KEY"; fi
+          if [ -n "$SLACK_API_KEY" ]; then echo "::add-mask::$SLACK_API_KEY"; fi
+          if [ -n "$NOTION_API_KEY" ]; then echo "::add-mask::$NOTION_API_KEY"; fi
+
+          # Build mcpServers conditionally — only emit linear/slack/notion entries
+          # when their corresponding secret is set, so repos that only configure
+          # ANTHROPIC_API_KEY don't advertise unusable integrations.
+          jq -n \
+            --arg gh "$GH_TOKEN" \
+            --arg linear "$LINEAR_API_KEY" \
+            --arg slack "$SLACK_API_KEY" \
+            --arg notion "$NOTION_API_KEY" \
+            '{
+              mcpServers:
+                ({
+                  github: {
+                    type: "http",
+                    url: "https://api.githubcopilot.com/mcp/",
+                    headers: {
+                      Authorization: ("Bearer " + $gh),
+                      "X-MCP-Toolsets": "pull_requests,issues,labels"
+                    }
+                  }
+                }
+                + (if $linear == "" then {} else {
+                    linear: {
+                      type: "stdio",
+                      command: "npx",
+                      args: ["-y", "mcp-linear"],
+                      env: { LINEAR_API_KEY: $linear }
+                    }
+                  } end)
+                + (if $slack == "" then {} else {
+                    slack: {
+                      type: "stdio",
+                      command: "npx",
+                      args: ["-y", "@modelcontextprotocol/server-slack"],
+                      env: { SLACK_BOT_TOKEN: $slack }
+                    }
+                  } end)
+                + (if $notion == "" then {} else {
+                    notion: {
+                      type: "stdio",
+                      command: "npx",
+                      args: ["-y", "@notionhq/notion-mcp-server"],
+                      env: {
+                        OPENAPI_MCP_HEADERS: (
+                          {
+                            Authorization: ("Bearer " + $notion),
+                            "Notion-Version": "2022-06-28"
+                          } | tojson
+                        )
+                      }
+                    }
+                  } end))
+            }' > .mcp.json
+
+      - name: Configure git identity
+        env:
+          ACTOR: ${{ github.actor }}
+        run: |
+          git config user.name "$ACTOR"
+          git config user.email "${ACTOR}@users.noreply.github.com"
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Use skill /knowledge-distillery:batch-refine.
+            Find all PRs with 'knowledge:pending' label,
+            collect evidence using each PR's Evidence Bundle Manifest, run refinement pipeline,
+            write accepted entries to a changeset file.
+            Naming conventions (MUST follow exactly):
+            - Report branch: knowledge/batch-YYYY-MM-DD (e.g. knowledge/batch-2026-03-27)
+            - Changeset file: .knowledge/changesets/batch-YYYY-MM-DD.json
+            - Only entries with .entries[].status == "accepted" are included
+            On success: update label to 'knowledge:collected'.
+            On insufficient evidence: leave label as 'knowledge:pending' and report the reason.
+            Create a Report PR with change summary.
+            Do NOT modify vault.db directly — the changeset will be applied on merge.
+          claude_args: "--plugin-dir .knowledge-distillery-plugin --allowedTools 'mcp__github__*,mcp__linear__*,mcp__slack__*,mcp__notion__*,Bash(*),Read(*),Write(*),Glob(*),Grep(*),Skill(*),Agent(*)'"
+          show_full_output: true
+
+      - name: Cleanup sensitive files
+        if: always()
+        run: rm -f .mcp.json

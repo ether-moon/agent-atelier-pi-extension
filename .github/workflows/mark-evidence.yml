@@ -1,0 +1,72 @@
+name: Knowledge Distillery — Mark Evidence
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main, master]
+
+jobs:
+  mark-evidence:
+    if: >-
+      github.event.pull_request.merged == true &&
+      !startsWith(github.event.pull_request.head.ref, 'knowledge/batch-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Checkout Knowledge Distillery plugin
+        uses: actions/checkout@v6
+        with:
+          repository: ether-moon/knowledge-distillery
+          ref: 5b7981d3a2d904b16f15e9ac2ca68c8d48aebee1  # main as of 2026-04-28
+          path: .knowledge-distillery-plugin
+
+      - name: Write dynamic MCP config
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+        run: |
+          if [ -n "$LINEAR_API_KEY" ]; then echo "::add-mask::$LINEAR_API_KEY"; fi
+
+          jq -n \
+            --arg gh "$GH_TOKEN" \
+            --arg linear "$LINEAR_API_KEY" \
+            '{
+              mcpServers: {
+                github: {
+                  type: "http",
+                  url: "https://api.githubcopilot.com/mcp/",
+                  headers: {
+                    Authorization: ("Bearer " + $gh),
+                    "X-MCP-Toolsets": "pull_requests,issues,labels"
+                  }
+                },
+                linear: {
+                  type: "stdio",
+                  command: "npx",
+                  args: ["-y", "mcp-linear"],
+                  env: { LINEAR_API_KEY: $linear }
+                }
+              }
+            }' > .mcp.json
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Use skill /knowledge-distillery:mark-evidence for PR #${{ github.event.pull_request.number }}.
+            Extract evidence identifiers, write Evidence Bundle Manifest as PR comment,
+            and add 'knowledge:pending' label.
+          claude_args: "--plugin-dir .knowledge-distillery-plugin --allowedTools 'mcp__github__*,mcp__linear__*,Bash(*),Read(*),Glob(*),Grep(*),Skill(*)'"
+          show_full_output: true
+
+      - name: Cleanup sensitive files
+        if: always()
+        run: rm -f .mcp.json
