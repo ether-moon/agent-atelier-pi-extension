@@ -1,0 +1,27 @@
+## Decisions Made
+- Remove `Bash(sqlite3 .knowledge/vault.db:*)` allow entry: CLAUDE.md line 10 explicitly forbids direct reads of `.knowledge/`, so the permission directly bypasses a project guardrail.
+- Add `git pull --rebase origin "$BASE_REF"` before push in apply-changeset commit step: the workflow's concurrency group only serializes this workflow, but other commits to the base branch (including from the same workflow's later cleanup step) can land between checkout and push.
+- Add workflow-level `concurrency` block on batch-refine: scheduled and manual runs both write to fixed date-keyed branch/artifact paths (`knowledge/batch-YYYY-MM-DD`), so same-day overlap collides.
+- Add job-level `concurrency` keyed by PR number on curate-report: two collaborators issuing `/curate` on the same Report PR race on `contents: write`.
+- Defer two items to user input: (a) exact `git notes` permission pattern in settings.json — pattern-design choice with multiple valid forms; (b) conditional mcpServers in batch-refine — >10 lines, structural restructure of the working `jq -n` block.
+
+## Problems Encountered
+- PreToolUse hook blocked direct `git commit`: project enforces `/knowledge-distillery:memento-commit`. Resolved by switching to the memento workflow.
+
+## Constraints Identified
+- Branch name mismatch: local `agent-atelier-pi-port` tracks `origin/los-angeles-v3`. Push must use `agent-atelier-pi-port:los-angeles-v3` refspec.
+- CLAUDE.md forbids reading `.knowledge/` directly — vault access only through `knowledge-gate` CLI; this constrains permission-allow design.
+- The `autofixing-and-escalating` skill scopes auto-fix to OBVIOUS items only; AMBIGUOUS items must be escalated to the user with rationale.
+
+## Open Questions
+- Which `git notes` permission pattern should be added to `.claude/settings.json` to support Memento without prompts: `Bash(git notes:*)` (broad), `Bash(git notes refs/notes/commits:*)` (scoped to the project ref), or a more granular pair (`add`/`push`)?
+- For batch-refine.yml mcpServers, should the conditional construction follow CodeRabbit's `jq` `+ (if … then {} else {…} end)` pattern, or restructure into a small build-script step? Trade-off: a single-expression `jq` keeps the workflow inline but is dense; a script step is clearer but adds a file.
+
+## Context
+Resolving 5 CodeRabbit Major comments on PR #2 in `ether-moon/agent-atelier-pi-extension`. Auto-applied 3 OBVIOUS workflow concurrency/race-safety fixes plus the OBVIOUS removal half of #1; escalated the design-choice halves of #1 and #4 to the user. Touched: `.claude/settings.json`, `.github/workflows/apply-changeset.yml`, `.github/workflows/batch-refine.yml`, `.github/workflows/curate-report.yml`. Files validated as parseable JSON/YAML before commit.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
