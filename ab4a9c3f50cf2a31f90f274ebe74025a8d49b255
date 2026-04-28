@@ -1,0 +1,23 @@
+## Decisions Made
+- Create CLAUDE.md as the directive file: per setup skill's decision table (neither CLAUDE.md nor AGENTS.md existed; no @AGENTS.md reference)
+- Use English for CLAUDE.md content and commit message: matches existing commit style ("docs: initial design...")
+- Commit `.knowledge/vault.db` rather than gitignore it: downstream `apply-changeset` workflow expects vault.db tracked; only `.knowledge/tmp/` is ignored
+
+## Problems Encountered
+- Direct `git commit` blocked by pre-commit-memento hook: switched to /knowledge-distillery:memento-commit as instructed by the hook output
+
+## Constraints Identified
+- Direct `git commit` is forbidden in this repo: hook-enforced; all commits must flow through memento-commit so the evidence pipeline gets session context
+- Knowledge Distillery secrets (ANTHROPIC_API_KEY, LINEAR_API_KEY, SLACK_API_KEY, NOTION_API_KEY) must be added to repo secrets before workflows can run
+
+## Open Questions
+- Whether the Monday 09:00 UTC batch-refine cron schedule fits the team's review cadence: left at the template default
+
+## Context
+Bootstrapped Knowledge Distillery in the `los-angeles-v3` branch via /knowledge-distillery:setup, then began shipping via /skill-set:pr:ship. Created vault.db, four GitHub Actions workflows, CLAUDE.md (Knowledge Vault + Memento sections), and added knowledge-gate + sqlite3 permissions to .claude/settings.json. Outcome: setup complete; commit being made via memento-commit after the pre-commit hook redirected the workflow.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
