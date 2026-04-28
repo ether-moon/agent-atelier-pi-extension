@@ -21,7 +21,7 @@ Port the upstream [agent-atelier](https://github.com/ether-moon/agent-atelier) C
 
 3. **Plan approval — `ExitPlanMode` registered tool + `ctx.ui.confirm`.** Register an `ExitPlanMode` tool whose handler triggers `ctx.ui.confirm("Approve plan?", planText)`. On approval, the orchestrator respawns the builder using the unrestricted `builder` agent, passing the approved plan as task context. Respawn-on-approval is the accepted trade-off — pi cannot dynamically grant tools to a running spawn.
 
-4. **Tool-name normalization.** Single source of truth in `src/lib/tools.ts`. Maps Claude Code names (e.g. `Bash, Read, Edit, Glob, Grep, LSP`) → pi names (`bash, read, edit, find, grep, ...`). Used both at agent-load time (rewriting `tools:` frontmatter when bundled markdown is loaded) and at `tool_call` enforcement.
+4. **Tool-name normalization.** Single source of truth in `src/lib/tools.ts`. Maps Claude Code names (e.g. `Bash, Read, Edit, Glob, Grep, LSP`) → pi names (`bash, read, edit, find, grep, ...`). Used at agent-load time, rewriting the `tools:` frontmatter when bundled markdown is loaded. The `tool_call` event handler reads `event.toolName`, which pi already emits in canonical form, so no second normalization pass is needed there.
 
 5. **State writes via bash, reads via TS.** All mutations call `scripts/state-commit` through `pi.exec("bash", [scriptPath, ...args], { input })`. Reads are direct `fs.readFile` from TS. The bash script preserves the upstream sole-writer / fcntl-locked atomic-write guarantees. A lint rule forbids direct writes to `.agent-atelier/*.json` outside the bridge.
 

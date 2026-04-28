@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { optionString, parseArgs, requireRequestId } from "../lib/argparse.js";
+import { nextCandidateId } from "../lib/ids.js";
 import { formatJson, postText } from "../lib/output.js";
 import { relativeStatePath } from "../lib/paths.js";
 import { nowIso } from "../lib/time.js";
@@ -164,14 +165,6 @@ function requireCandidateItem(store: WorkItemsStore, id: string) {
   const item = store.items.find((candidate) => candidate.id === id);
   if (!item) throw new Error(`${id} not found`);
   return item;
-}
-
-function nextCandidateId(existing: CandidateSet[]): string {
-  const max = existing.reduce((highest, candidate) => {
-    const match = /^CS-(\d+)$/.exec(candidate.id);
-    return match ? Math.max(highest, Number(match[1])) : highest;
-  }, 0);
-  return `CS-${String(max + 1).padStart(3, "0")}`;
 }
 
 function ensureNotQueued(loop: ReturnType<typeof readLoopState>, ids: string[]): void {

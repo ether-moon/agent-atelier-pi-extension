@@ -39,22 +39,28 @@ pi exposes a richer set of orchestration primitives than what agent-atelier curr
 
 See [`docs/plan.md`](docs/plan.md) for the phased implementation plan (Phases 1–6, file-by-file).
 
-## Local Development
+## Install
+
+The v1 distribution model is git-clone + symlink (matches the pi extension example pattern; npm publishing is deferred to post-v1).
 
 ```bash
-npm install
-npm test
-npx pi -e ./src/index.ts
-```
-
-## Install From Clone
-
-```bash
+git clone https://github.com/ether-moon/agent-atelier-pi-extension.git
+cd agent-atelier-pi-extension
+npm install     # installs runtime deps (pi-agent-core, pi-ai, pi-tui, typebox)
 mkdir -p ~/.pi/agent/extensions/agent-atelier
 ln -sf "$(pwd)/src/index.ts" ~/.pi/agent/extensions/agent-atelier/index.ts
 ```
 
-The extension loads bundled `agents/`, `prompts/`, `scripts/`, `schema/`, and `references/` relative to this repository checkout.
+The extension loads bundled `agents/`, `prompts/`, `scripts/`, `schema/`, and `references/` relative to this repository checkout, so keep the clone in place after symlinking.
+
+## Development
+
+```bash
+npm install         # runtime + dev deps
+npm run typecheck   # tsc --noEmit
+npm test            # bash tests/all.sh
+npx pi -e ./src/index.ts   # ad-hoc invocation against the local source
+```
 
 ## License
 

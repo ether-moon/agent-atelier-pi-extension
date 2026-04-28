@@ -24,10 +24,12 @@ export function renderStatusWidget(input: {
   const activeCandidate = loop.active_candidate_set
     ? `${loop.active_candidate_set.id} (${loop.active_candidate_set.work_item_ids.join(",")})`
     : "none";
-  const activeWis = workItems.items
-    .filter((item) => ["ready", "implementing", "candidate_validating", "reviewing", "blocked_on_human_gate"].includes(item.status))
-    .slice(0, 5)
-    .map(formatActiveWi);
+  const ACTIVE_WI_LIMIT = 5;
+  const activeWiAll = workItems.items.filter((item) =>
+    ["ready", "implementing", "candidate_validating", "reviewing", "blocked_on_human_gate"].includes(item.status)
+  );
+  const activeWis = activeWiAll.slice(0, ACTIVE_WI_LIMIT).map(formatActiveWi);
+  const hiddenActiveWis = Math.max(0, activeWiAll.length - ACTIVE_WI_LIMIT);
   const monitors = watchdog.monitors ? Object.values(watchdog.monitors) : [];
   const monitorText =
     monitors.length === 0 ? "none" : monitors.map((monitor) => `${monitor.name}:${monitor.status}#${monitor.pid}`).join(" ");
@@ -41,6 +43,7 @@ export function renderStatusWidget(input: {
     `monitors: ${monitorText}`
   ];
   if (activeWis.length > 0) lines.push(...activeWis);
+  if (hiddenActiveWis > 0) lines.push(`... and ${hiddenActiveWis} more active WI${hiddenActiveWis === 1 ? "" : "s"}`);
   return lines;
 }
 

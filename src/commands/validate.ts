@@ -28,12 +28,22 @@ export function registerValidateCommand(pi: ExtensionAPI): void {
       normalizeManifest(manifest);
       const id = String(manifest.id);
       const relManifestPath = `.agent-atelier/validation/${id}/manifest.json`;
-      fs.mkdirSync(path.dirname(path.join(root, relManifestPath)), { recursive: true });
-      fs.writeFileSync(path.join(root, relManifestPath), `${JSON.stringify(manifest, null, 2)}\n`);
+      const manifestWrite: StateTransaction["writes"][number] = {
+        path: relManifestPath,
+        expected_revision: null,
+        content: manifest
+      };
 
       const status = String(manifest.status);
       if (status === "environment_error") {
-        postText(pi, `Recorded environment-error validation manifest ${relManifestPath}; state unchanged.`);
+        const result = await commitTx(pi, ctx.cwd, {
+          request_id: requestId,
+          message: `aa-validate record ${id}`,
+          writes: [manifestWrite],
+          deletes: []
+        });
+        refreshAtelierWidgets(ctx);
+        postText(pi, `Recorded environment-error validation manifest ${relManifestPath}; state unchanged.\n\n${formatJson(result)}`, result);
         return;
       }
 
@@ -67,6 +77,7 @@ export function registerValidateCommand(pi: ExtensionAPI): void {
       }
 
       const writes: StateTransaction["writes"] = [
+        manifestWrite,
         { path: relativeStatePath("workItems"), expected_revision: store.revision, content: nextWork }
       ];
       if (status === "failed") {

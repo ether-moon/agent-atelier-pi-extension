@@ -105,13 +105,22 @@ function ciStatus() {
 }
 
 function branchDivergence() {
-  const base = git(["rev-parse", "--verify", "origin/main"], false) ? "origin/main" : git(["rev-parse", "--verify", "main"], false) ? "main" : null;
+  const base = detectDefaultBase();
   if (!base) return;
   const counts = git(["rev-list", "--left-right", "--count", `${base}...HEAD`], false);
   if (!counts || counts === lastDivergence) return;
   lastDivergence = counts;
   const [behind, ahead] = counts.split(/\s+/).map(Number);
   appendEvent("branch_divergence", { monitor: name, base, behind, ahead });
+}
+
+function detectDefaultBase() {
+  const symbolic = git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], false);
+  if (symbolic) return symbolic;
+  for (const ref of ["origin/main", "origin/master", "origin/develop", "origin/trunk", "main", "master", "develop", "trunk"]) {
+    if (git(["rev-parse", "--verify", ref], false)) return ref;
+  }
+  return null;
 }
 
 function readJson(fileName) {

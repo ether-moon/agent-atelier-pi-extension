@@ -110,33 +110,42 @@ export function parseJsonOrFields(
   cwd: string
 ): Record<string, unknown> {
   const json = optionString(options, "json");
-  if (json) return JSON.parse(json) as Record<string, unknown>;
+  if (json) return parseJsonWithSource(json, "--json") as Record<string, unknown>;
 
   const input = optionString(options, "input");
   if (input) {
     const fullPath = path.resolve(cwd, input);
-    return JSON.parse(fs.readFileSync(fullPath, "utf-8")) as Record<string, unknown>;
+    return parseJsonWithSource(fs.readFileSync(fullPath, "utf-8"), `--input ${fullPath}`) as Record<string, unknown>;
   }
 
   const joined = positionals.join(" ").trim();
-  if (joined.startsWith("{")) return JSON.parse(joined) as Record<string, unknown>;
+  if (joined.startsWith("{")) return parseJsonWithSource(joined, "positional JSON") as Record<string, unknown>;
 
   const fields: Record<string, unknown> = {};
   for (const token of positionals) {
     const eq = token.indexOf("=");
     if (eq === -1) continue;
-    fields[token.slice(0, eq)] = parseScalar(token.slice(eq + 1));
+    fields[token.slice(0, eq)] = parseScalar(token.slice(eq + 1), token.slice(0, eq));
   }
   return fields;
 }
 
-function parseScalar(value: string): unknown {
+function parseJsonWithSource(text: string, source: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`failed to parse JSON from ${source}: ${message}`);
+  }
+}
+
+function parseScalar(value: string, fieldName?: string): unknown {
   if (value === "null") return null;
   if (value === "true") return true;
   if (value === "false") return false;
   if (/^-?\d+(\.\d+)?$/.test(value)) return Number(value);
   if ((value.startsWith("[") && value.endsWith("]")) || (value.startsWith("{") && value.endsWith("}"))) {
-    return JSON.parse(value);
+    return parseJsonWithSource(value, fieldName ? `field "${fieldName}"` : "scalar JSON");
   }
   if (value.includes(",")) return value.split(",").map((part) => part.trim()).filter(Boolean);
   return value;

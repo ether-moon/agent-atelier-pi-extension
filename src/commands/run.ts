@@ -1,12 +1,11 @@
 import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import path from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { optionBool, parseArgs } from "../lib/argparse.js";
+import { nextCandidateId } from "../lib/ids.js";
 import { formatJson, postText } from "../lib/output.js";
-import { relativeStatePath, repoRoot, stateExists, validationDir } from "../lib/paths.js";
+import { relativeStatePath, repoRoot, stateExists } from "../lib/paths.js";
 import { nowIso } from "../lib/time.js";
-import type { LoopState, WorkItem, WorkItemsStore } from "../lib/types.js";
+import type { LoopState, StateTransaction, WorkItem, WorkItemsStore } from "../lib/types.js";
 import { readLoopState } from "../state/loopState.js";
 import { commitTx } from "../state/stateCommit.js";
 import { buildVrmPrompt } from "../state/vrmPrompt.js";
@@ -81,17 +80,24 @@ async function runOneCycle(pi: ExtensionAPI, ctx: ExtensionCommandContext): Prom
 
 async function coldResumeSweep(pi: ExtensionAPI, ctx: ExtensionCommandContext): Promise<void> {
   const store = readWorkItems(ctx.cwd);
-  const stranded = store.items.filter((item) => item.status === "implementing");
+  const now = Date.now();
+  const isExpired = (item: WorkItem): boolean => {
+    if (!item.lease_expires_at) return true;
+    const expiresMs = Date.parse(item.lease_expires_at);
+    return Number.isNaN(expiresMs) || expiresMs < now;
+  };
+  const stranded = store.items.filter((item) => item.status === "implementing" && isExpired(item));
   if (stranded.length === 0) return;
+  const strandedIds = new Set(stranded.map((item) => item.id));
 
   const next = bumpWorkItemsStore(cloneWorkItems(store));
   for (const item of next.items) {
-    if (item.status !== "implementing") continue;
+    if (!strandedIds.has(item.id)) continue;
     item.status = "ready";
     item.owner_session_id = null;
     item.last_heartbeat_at = null;
     item.lease_expires_at = null;
-    item.last_requeue_reason = "cold-resume: owner session unavailable";
+    item.last_requeue_reason = "cold-resume: lease expired";
     item.revision += 1;
   }
 
@@ -209,25 +215,44 @@ async function validateOrReviewActiveCandidate(
       `Commit: ${active.commit}`,
       `Work items: ${active.work_item_ids.join(", ")}`,
       `Evidence input:\n${formatJson(vrmInput)}`,
-      `Return objective validation findings only.`
+      `Return a single JSON object as the final message:`,
+      `  {"status":"passed"|"failed"|"environment_error","summary":"...","findings":[...]}`,
+      `Set status to "passed" only when every verification check succeeded.`,
+      `Use "environment_error" for tooling/environment failures, "failed" otherwise.`
     ].join("\n")
   );
-  const passed = vrmOutput.trim().length > 0;
+  const verdict = parseVrmVerdict(vrmOutput);
   const runId = `RUN-${new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "Z")}`;
-  const manifestPath = writeValidationManifest(ctx.cwd, runId, active, activeItems, passed ? "passed" : "failed", vrmOutput);
 
-  if (!passed) {
-    await demoteActiveCandidate(pi, ctx.cwd, active.work_item_ids, `validation failed: ${manifestPath}`);
-    return `VRM failed ${active.id}; candidate was demoted and WIs returned to ready.`;
+  if (verdict.status === "environment_error") {
+    const manifest = buildValidationManifest(runId, active, activeItems, "failed", vrmOutput);
+    const manifestWrite = manifestWriteEntry(manifest);
+    await recordEnvironmentErrorManifest(pi, ctx.cwd, manifestWrite);
+    return `VRM reported environment_error for ${active.id}; manifest ${manifest.relPath} recorded, candidate left active for retry.`;
   }
+
+  if (verdict.status === "failed") {
+    const manifest = buildValidationManifest(runId, active, activeItems, "failed", vrmOutput);
+    await demoteActiveCandidate(
+      pi,
+      ctx.cwd,
+      active.work_item_ids,
+      `validation failed: ${manifest.relPath}`,
+      [manifestWriteEntry(manifest)]
+    );
+    return `VRM failed ${active.id} (${verdict.reason}); candidate was demoted and WIs returned to ready.`;
+  }
+
+  const manifest = buildValidationManifest(runId, active, activeItems, "passed", vrmOutput);
+  const manifestWrite = manifestWriteEntry(manifest);
 
   const fastTrack = activeItems.every((item) => item.complexity === "simple") && diffStatLines(ctx.cwd) <= 30 && !hasSensitiveOwnedPath(activeItems);
   if (fastTrack) {
-    await completeActiveCandidate(pi, ctx.cwd, activeItems, manifestPath, "fast-track validation");
+    await completeActiveCandidate(pi, ctx.cwd, activeItems, manifest.relPath, "fast-track validation", [manifestWrite]);
     return `VRM passed ${active.id}; simple candidate fast-tracked to done.`;
   }
 
-  await markCandidateReviewing(pi, ctx.cwd, active.work_item_ids, manifestPath);
+  await markCandidateReviewing(pi, ctx.cwd, active.work_item_ids, manifest.relPath, [manifestWrite]);
   return `VRM passed ${active.id}; candidate moved to review. Run /aa-run again for QA/UX review.`;
 }
 
@@ -292,7 +317,7 @@ async function enqueueAndActivateCandidate(pi: ExtensionAPI, cwd: string, id: st
   const item = nextWork.items.find((wi) => wi.id === id);
   if (!item) throw new Error(`${id} not found`);
   const candidate = {
-    id: nextCandidateId(loop),
+    id: nextCandidateId([...(loop.active_candidate_set ? [loop.active_candidate_set] : []), ...loop.candidate_queue]),
     work_item_ids: [id],
     branch,
     commit,
@@ -327,12 +352,18 @@ async function enqueueAndActivateCandidate(pi: ExtensionAPI, cwd: string, id: st
   });
 }
 
-async function markCandidateReviewing(pi: ExtensionAPI, cwd: string, ids: string[], manifestPath: string): Promise<void> {
+async function markCandidateReviewing(
+  pi: ExtensionAPI,
+  cwd: string,
+  ids: string[],
+  manifestPath: string,
+  extraWrites: StateTransaction["writes"] = []
+): Promise<void> {
   await updateWorkItems(pi, cwd, ids, (item) => {
     item.status = "reviewing";
     item.promotion.status = "reviewing";
     item.validation_manifest = manifestPath;
-  }, "aa-run mark reviewing");
+  }, "aa-run mark reviewing", extraWrites);
 }
 
 async function completeActiveCandidate(
@@ -340,7 +371,8 @@ async function completeActiveCandidate(
   cwd: string,
   items: WorkItem[],
   manifestPath: string | null,
-  summary: string
+  summary: string,
+  extraWrites: StateTransaction["writes"] = []
 ): Promise<void> {
   const loop = readLoopState(cwd);
   const work = readWorkItems(cwd);
@@ -363,6 +395,7 @@ async function completeActiveCandidate(
     request_id: `aa-run-complete-${Date.now()}`,
     message: "aa-run complete candidate",
     writes: [
+      ...extraWrites,
       { path: relativeStatePath("workItems"), expected_revision: work.revision, content: nextWork },
       {
         path: relativeStatePath("loop"),
@@ -381,7 +414,13 @@ async function completeActiveCandidate(
   });
 }
 
-async function demoteActiveCandidate(pi: ExtensionAPI, cwd: string, ids: string[], reason: string): Promise<void> {
+async function demoteActiveCandidate(
+  pi: ExtensionAPI,
+  cwd: string,
+  ids: string[],
+  reason: string,
+  extraWrites: StateTransaction["writes"] = []
+): Promise<void> {
   const loop = readLoopState(cwd);
   const work = readWorkItems(cwd);
   const nextWork = bumpWorkItemsStore(cloneWorkItems(work));
@@ -397,6 +436,7 @@ async function demoteActiveCandidate(pi: ExtensionAPI, cwd: string, ids: string[
     request_id: `aa-run-demote-${Date.now()}`,
     message: "aa-run demote candidate",
     writes: [
+      ...extraWrites,
       { path: relativeStatePath("workItems"), expected_revision: work.revision, content: nextWork },
       {
         path: relativeStatePath("loop"),
@@ -411,6 +451,19 @@ async function demoteActiveCandidate(pi: ExtensionAPI, cwd: string, ids: string[
         }
       }
     ],
+    deletes: []
+  });
+}
+
+async function recordEnvironmentErrorManifest(
+  pi: ExtensionAPI,
+  cwd: string,
+  manifestWrite: StateTransaction["writes"][number]
+): Promise<void> {
+  await commitTx(pi, cwd, {
+    request_id: `aa-run-vrm-env-error-${Date.now()}`,
+    message: "aa-run vrm environment error",
+    writes: [manifestWrite],
     deletes: []
   });
 }
@@ -440,7 +493,8 @@ async function updateWorkItems(
   cwd: string,
   ids: string[],
   mutate: (item: WorkItem) => void,
-  message: string
+  message: string,
+  extraWrites: StateTransaction["writes"] = []
 ): Promise<void> {
   const store = readWorkItems(cwd);
   const next = bumpWorkItemsStore(cloneWorkItems(store));
@@ -453,7 +507,10 @@ async function updateWorkItems(
   await commitTx(pi, cwd, {
     request_id: `${message.replace(/\s+/g, "-")}-${Date.now()}`,
     message,
-    writes: [{ path: relativeStatePath("workItems"), expected_revision: store.revision, content: next }],
+    writes: [
+      ...extraWrites,
+      { path: relativeStatePath("workItems"), expected_revision: store.revision, content: next }
+    ],
     deletes: []
   });
 }
@@ -473,7 +530,9 @@ async function runBundledAgent(ctx: ExtensionCommandContext, agentName: string, 
     (results) => ({ mode: "single", agentsDir: discovery.agentsDir, results })
   );
   if (result.exitCode !== 0 || result.stopReason === "error" || result.stopReason === "aborted") {
-    throw new Error(result.errorMessage || result.stderr || getFinalOutput(result.messages) || `${agentName} failed`);
+    const detail = result.errorMessage || result.stderr || getFinalOutput(result.messages);
+    const tag = `${agentName} failed (exitCode=${result.exitCode}, stopReason=${result.stopReason})`;
+    throw new Error(detail ? `${tag}: ${detail}` : tag);
   }
   return getFinalOutput(result.messages);
 }
@@ -491,18 +550,14 @@ function buildBuilderTask(item: WorkItem, plan: string | null): string {
     .join("\n\n");
 }
 
-function writeValidationManifest(
-  cwd: string,
+function buildValidationManifest(
   runId: string,
   active: NonNullable<LoopState["active_candidate_set"]>,
   items: WorkItem[],
   status: "passed" | "failed",
   output: string
-): string {
-  const root = repoRoot(cwd);
-  const dir = path.join(validationDir(root), runId);
-  fs.mkdirSync(dir, { recursive: true });
-  const manifest = {
+): { relPath: string; content: Record<string, unknown> } {
+  const content = {
     id: runId,
     candidate_set_id: active.id,
     work_item_ids: active.work_item_ids,
@@ -516,31 +571,58 @@ function writeValidationManifest(
     work_item_titles: items.map((item) => item.title),
     vrm_output: output
   };
-  const relPath = `.agent-atelier/validation/${runId}/manifest.json`;
-  fs.writeFileSync(path.join(root, relPath), `${JSON.stringify(manifest, null, 2)}\n`);
-  return relPath;
+  return { relPath: `.agent-atelier/validation/${runId}/manifest.json`, content };
+}
+
+function manifestWriteEntry(manifest: { relPath: string; content: Record<string, unknown> }): StateTransaction["writes"][number] {
+  return { path: manifest.relPath, expected_revision: null, content: manifest.content };
+}
+
+interface VrmVerdict {
+  status: "passed" | "failed" | "environment_error";
+  reason: string;
+}
+
+function parseVrmVerdict(output: string): VrmVerdict {
+  const trimmed = output.trim();
+  if (!trimmed) return { status: "failed", reason: "empty VRM output" };
+  const parsed = extractJson(trimmed);
+  if (!parsed || typeof parsed !== "object") {
+    return { status: "failed", reason: "VRM output missing structured verdict" };
+  }
+  const status = (parsed as { status?: unknown }).status;
+  if (status === "passed" || status === "failed" || status === "environment_error") {
+    const summary = typeof (parsed as { summary?: unknown }).summary === "string" ? (parsed as { summary: string }).summary : status;
+    return { status, reason: summary };
+  }
+  return { status: "failed", reason: `unexpected VRM status: ${String(status)}` };
 }
 
 function extractJson(text: string): unknown | null {
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
-  const candidate = fenced?.[1] ?? text;
-  const start = candidate.indexOf("{");
-  const end = candidate.lastIndexOf("}");
-  if (start === -1 || end === -1 || end <= start) return null;
-  try {
-    return JSON.parse(candidate.slice(start, end + 1));
-  } catch {
-    return null;
+  const candidates: string[] = [];
+  const trimmed = text.trim();
+  if (trimmed) candidates.push(trimmed);
+  for (const match of text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)) {
+    if (match[1]) candidates.push(match[1].trim());
   }
-}
-
-function nextCandidateId(loop: LoopState): string {
-  const candidates = [...(loop.active_candidate_set ? [loop.active_candidate_set] : []), ...loop.candidate_queue];
-  const max = candidates.reduce((highest, candidate) => {
-    const match = /^CS-(\d+)$/.exec(candidate.id);
-    return match ? Math.max(highest, Number(match[1])) : highest;
-  }, 0);
-  return `CS-${String(max + 1).padStart(3, "0")}`;
+  for (const slice of candidates) {
+    try {
+      return JSON.parse(slice);
+    } catch {
+      // try next candidate
+    }
+  }
+  for (const slice of candidates) {
+    const start = slice.indexOf("{");
+    const end = slice.lastIndexOf("}");
+    if (start === -1 || end <= start) continue;
+    try {
+      return JSON.parse(slice.slice(start, end + 1));
+    } catch {
+      // try next candidate
+    }
+  }
+  return null;
 }
 
 function currentGitRef(cwd: string): { branch: string; commit: string } {

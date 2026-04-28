@@ -140,6 +140,12 @@ export async function runSingleAgent(
     let wasAborted = false;
     const exitCode = await new Promise<number>((resolve) => {
       const invocation = getPiInvocation(args);
+      // AA_ACTIVE_AGENT propagates the subagent's identity to the child pi
+      // process. events/toolCall.ts reads this var to decide whether to apply
+      // the plan-mode allowlist. Inheritance is deliberate: nested aa-subagent
+      // invocations (e.g. parent builder calls aa-subagent for a plan check)
+      // overwrite the var with the new agent name, so the bash gating tracks
+      // the active agent at every depth.
       const proc = spawn(invocation.command, invocation.args, {
         cwd: cwd ?? defaultCwd,
         env: { ...process.env, AA_ACTIVE_AGENT: agentName },
