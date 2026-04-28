@@ -1,0 +1,12 @@
+{
+  "enabledPlugins": {
+    "skill-set@ether-plugins": true,
+    "knowledge-distillery@ether-plugins": true
+  },
+  "permissions": {
+    "allow": [
+      "Bash(*/knowledge-gate:*)",
+      "Bash(sqlite3 .knowledge/vault.db:*)"
+    ]
+  }
+}
