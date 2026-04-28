@@ -1,0 +1,22 @@
+## Decisions Made
+- Re-stat the events file after `appendEvent` instead of computing `size + bytesWritten`: `appendEvent` does not return the byte count, and re-stat is robust to concurrent writers (state-commit, other monitors). The cost is one extra `fs.statSync` per change-tick, which is negligible at the ~15s interval.
+- On stat failure, fall back to the pre-append `size` rather than `lastEventSize` so we do not re-emit the same event on the next tick.
+
+## Problems Encountered
+- CodeRabbit suggested either "add bytes written" or "re-stat after append". The first option would require changing `appendEvent`'s return signature, rippling through five other call sites. Resolved by choosing re-stat, which is local to `eventTail()`.
+
+## Constraints Identified
+- `appendEvent` is fire-and-forget (`fs.appendFileSync` with no return value); changing it would touch all five monitor functions. The local fix in `eventTail` is the minimal, contained change.
+- The monitor runs at `intervalMs >= 1000ms`; the extra `statSync` per change-tick is well below the budget.
+
+## Open Questions
+- None
+
+## Context
+Resolved CodeRabbit critical thread on `src/monitors/worker.mjs` (PR #1). The `eventTail` monitor was appending its own `event_log_advanced` record into `events.ndjson` and then storing the pre-append size, so every tick observed the prior tick's write as a new "external" change and emitted again. Fix re-stats the file after the append so `lastEventSize` reflects the post-write size; on stat error falls back to the pre-append size. `npm test` (which exercises the event-tail spawn flow) passes.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
