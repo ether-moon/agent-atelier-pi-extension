@@ -40,44 +40,57 @@ jobs:
           if [ -n "$SLACK_API_KEY" ]; then echo "::add-mask::$SLACK_API_KEY"; fi
           if [ -n "$NOTION_API_KEY" ]; then echo "::add-mask::$NOTION_API_KEY"; fi
 
-          NOTION_HEADERS=$(jq -nc \
-            --arg token "$NOTION_API_KEY" \
-            '{Authorization: ("Bearer " + $token), "Notion-Version": "2022-06-28"}')
-
+          # Build mcpServers conditionally — only emit linear/slack/notion entries
+          # when their corresponding secret is set, so repos that only configure
+          # ANTHROPIC_API_KEY don't advertise unusable integrations.
           jq -n \
             --arg gh "$GH_TOKEN" \
             --arg linear "$LINEAR_API_KEY" \
             --arg slack "$SLACK_API_KEY" \
-            --arg notion_headers "$NOTION_HEADERS" \
+            --arg notion "$NOTION_API_KEY" \
             '{
-              mcpServers: {
-                github: {
-                  type: "http",
-                  url: "https://api.githubcopilot.com/mcp/",
-                  headers: {
-                    Authorization: ("Bearer " + $gh),
-                    "X-MCP-Toolsets": "pull_requests,issues,labels"
+              mcpServers:
+                ({
+                  github: {
+                    type: "http",
+                    url: "https://api.githubcopilot.com/mcp/",
+                    headers: {
+                      Authorization: ("Bearer " + $gh),
+                      "X-MCP-Toolsets": "pull_requests,issues,labels"
+                    }
                   }
-                },
-                linear: {
-                  type: "stdio",
-                  command: "npx",
-                  args: ["-y", "mcp-linear"],
-                  env: { LINEAR_API_KEY: $linear }
-                },
-                slack: {
-                  type: "stdio",
-                  command: "npx",
-                  args: ["-y", "@modelcontextprotocol/server-slack"],
-                  env: { SLACK_BOT_TOKEN: $slack }
-                },
-                notion: {
-                  type: "stdio",
-                  command: "npx",
-                  args: ["-y", "@notionhq/notion-mcp-server"],
-                  env: { OPENAPI_MCP_HEADERS: $notion_headers }
                 }
-              }
+                + (if $linear == "" then {} else {
+                    linear: {
+                      type: "stdio",
+                      command: "npx",
+                      args: ["-y", "mcp-linear"],
+                      env: { LINEAR_API_KEY: $linear }
+                    }
+                  } end)
+                + (if $slack == "" then {} else {
+                    slack: {
+                      type: "stdio",
+                      command: "npx",
+                      args: ["-y", "@modelcontextprotocol/server-slack"],
+                      env: { SLACK_BOT_TOKEN: $slack }
+                    }
+                  } end)
+                + (if $notion == "" then {} else {
+                    notion: {
+                      type: "stdio",
+                      command: "npx",
+                      args: ["-y", "@notionhq/notion-mcp-server"],
+                      env: {
+                        OPENAPI_MCP_HEADERS: (
+                          {
+                            Authorization: ("Bearer " + $notion),
+                            "Notion-Version": "2022-06-28"
+                          } | tojson
+                        )
+                      }
+                    }
+                  } end))
             }' > .mcp.json
 
       - name: Configure git identity

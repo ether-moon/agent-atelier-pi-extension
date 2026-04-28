@@ -5,7 +5,9 @@
   },
   "permissions": {
     "allow": [
-      "Bash(*/knowledge-gate:*)"
+      "Bash(*/knowledge-gate:*)",
+      "Bash(git notes:*)",
+      "Bash(git push origin refs/notes/commits:*)"
     ]
   }
 }
