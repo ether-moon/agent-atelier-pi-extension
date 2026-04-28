@@ -1,0 +1,25 @@
+## Decisions Made
+- Chose broad `Bash(git notes:*)` allow over ref-scoped variants: Claude Code permission matching is prefix-based on the literal command, so commands with different argument orders would not match a ref-scoped allow. Future-proofs against Memento workflow argument changes.
+- Added `Bash(git push origin refs/notes/commits:*)` as a separate allow entry: notes push is a distinct command from `git notes`, and the Memento workflow runs it after every commit.
+- Applied CodeRabbit's jq conditional-merge diff verbatim over extracting to a helper script: smallest defensible change, no new maintained file.
+
+## Problems Encountered
+- batch-refine.yml emitted linear/slack/notion MCP server entries unconditionally even when the corresponding secret was empty: when only ANTHROPIC_API_KEY is configured, claude-code-action could pick an unusable server and fail. Resolved by jq object-merge with `if $secret == "" then {} else {...} end` per integration.
+- Original `.claude/settings.json` allowed direct `Bash(sqlite3 .knowledge/vault.db:*)` which contradicts CLAUDE.md line 10 (no direct .knowledge/ reads). Already removed by the prior resolving-pr-blockers commit (32ef6ce); this commit only adds the Memento permissions.
+
+## Constraints Identified
+- Claude Code permission matching is literal-prefix on the command tail: ref-scoped allows like `Bash(git notes --ref=...:*)` only match when arguments appear in that exact order, making them fragile.
+- The jq conditional-merge approach keeps construction inline as a single expression, but adds ~20 lines to the run block. Alternative (extract to scripts/build-mcp-config.sh) was rejected to avoid a new maintained file.
+
+## Open Questions
+- Should the Memento workflow's required permissions be documented in CLAUDE.md so future readers know why these allow entries exist?
+- If the conditional-merge pattern is repeated in other workflows (mark-evidence, curate-report only have github / linear today), should this be factored into a shared helper at some point?
+
+## Context
+Continued PR #2 cleanup after CodeRabbit's incremental review on commit 4e6f925. The resolving-pr-blockers agent auto-applied 4 of 5 review items in commit 32ef6ce; this commit handles the two AMBIGUOUS items the agent escalated for user choice. Verified jq conditional-merge with all-set / none-set / partial-secret scenarios. Both files validated as parseable JSON / YAML.
+
+## Recorded Decisions
+None
+
+## Vault Entries Referenced
+None
