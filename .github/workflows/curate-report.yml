@@ -11,6 +11,9 @@ jobs:
       contains(github.event.comment.body, '/curate') &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
     runs-on: ubuntu-latest
+    concurrency:
+      group: curate-report-${{ github.event.issue.number }}
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write

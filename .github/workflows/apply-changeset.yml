@@ -88,6 +88,11 @@ jobs:
 
           git add .knowledge/vault.db
           git commit -m "knowledge: apply batch ${BATCH_DATE} changeset"
+
+          # Pull any commits that landed during apply, before pushing —
+          # the concurrency group only serializes this workflow; other commits
+          # to the base branch can land between checkout and push.
+          git pull --rebase origin "$BASE_REF"
           git push origin "$BASE_REF"
 
       - name: Clean up batch artifacts

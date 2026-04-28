@@ -5,8 +5,7 @@
   },
   "permissions": {
     "allow": [
-      "Bash(*/knowledge-gate:*)",
-      "Bash(sqlite3 .knowledge/vault.db:*)"
+      "Bash(*/knowledge-gate:*)"
     ]
   }
 }
