@@ -22,57 +22,66 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: ether-moon/knowledge-distillery
-          ref: main
+          ref: 5b7981d3a2d904b16f15e9ac2ca68c8d48aebee1  # main as of 2026-04-28
           path: .knowledge-distillery-plugin
 
       - name: Write dynamic MCP config
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LINEAR_API_KEY: ${{ secrets.LINEAR_API_KEY }}
+          SLACK_API_KEY: ${{ secrets.SLACK_API_KEY }}
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
         run: |
-          if [ -n "${{ secrets.LINEAR_API_KEY }}" ]; then echo "::add-mask::${{ secrets.LINEAR_API_KEY }}"; fi
-          if [ -n "${{ secrets.SLACK_API_KEY }}" ]; then echo "::add-mask::${{ secrets.SLACK_API_KEY }}"; fi
-          if [ -n "${{ secrets.NOTION_API_KEY }}" ]; then echo "::add-mask::${{ secrets.NOTION_API_KEY }}"; fi
-          cat > .mcp.json << 'MCPEOF'
-          {
-            "mcpServers": {
-              "github": {
-                "type": "http",
-                "url": "https://api.githubcopilot.com/mcp/",
-                "headers": {
-                  "Authorization": "Bearer ${{ secrets.GITHUB_TOKEN }}",
-                  "X-MCP-Toolsets": "pull_requests,issues,labels"
-                }
-              },
-              "linear": {
-                "type": "stdio",
-                "command": "npx",
-                "args": ["-y", "mcp-linear"],
-                "env": {
-                  "LINEAR_API_KEY": "${{ secrets.LINEAR_API_KEY }}"
-                }
-              },
-              "slack": {
-                "type": "stdio",
-                "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-slack"],
-                "env": {
-                  "SLACK_BOT_TOKEN": "${{ secrets.SLACK_API_KEY }}"
-                }
-              },
-              "notion": {
-                "type": "stdio",
-                "command": "npx",
-                "args": ["-y", "@notionhq/notion-mcp-server"],
-                "env": {
-                  "OPENAPI_MCP_HEADERS": "{\"Authorization\": \"Bearer ${{ secrets.NOTION_API_KEY }}\", \"Notion-Version\": \"2022-06-28\"}"
+          if [ -n "$LINEAR_API_KEY" ]; then echo "::add-mask::$LINEAR_API_KEY"; fi
+          if [ -n "$SLACK_API_KEY" ]; then echo "::add-mask::$SLACK_API_KEY"; fi
+          if [ -n "$NOTION_API_KEY" ]; then echo "::add-mask::$NOTION_API_KEY"; fi
+
+          NOTION_HEADERS=$(jq -nc \
+            --arg token "$NOTION_API_KEY" \
+            '{Authorization: ("Bearer " + $token), "Notion-Version": "2022-06-28"}')
+
+          jq -n \
+            --arg gh "$GH_TOKEN" \
+            --arg linear "$LINEAR_API_KEY" \
+            --arg slack "$SLACK_API_KEY" \
+            --arg notion_headers "$NOTION_HEADERS" \
+            '{
+              mcpServers: {
+                github: {
+                  type: "http",
+                  url: "https://api.githubcopilot.com/mcp/",
+                  headers: {
+                    Authorization: ("Bearer " + $gh),
+                    "X-MCP-Toolsets": "pull_requests,issues,labels"
+                  }
+                },
+                linear: {
+                  type: "stdio",
+                  command: "npx",
+                  args: ["-y", "mcp-linear"],
+                  env: { LINEAR_API_KEY: $linear }
+                },
+                slack: {
+                  type: "stdio",
+                  command: "npx",
+                  args: ["-y", "@modelcontextprotocol/server-slack"],
+                  env: { SLACK_BOT_TOKEN: $slack }
+                },
+                notion: {
+                  type: "stdio",
+                  command: "npx",
+                  args: ["-y", "@notionhq/notion-mcp-server"],
+                  env: { OPENAPI_MCP_HEADERS: $notion_headers }
                 }
               }
-            }
-          }
-          MCPEOF
+            }' > .mcp.json
 
       - name: Configure git identity
+        env:
+          ACTOR: ${{ github.actor }}
         run: |
-          git config user.name "${{ github.actor }}"
-          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          git config user.name "$ACTOR"
+          git config user.email "${ACTOR}@users.noreply.github.com"
 
       - uses: anthropics/claude-code-action@v1
         with:

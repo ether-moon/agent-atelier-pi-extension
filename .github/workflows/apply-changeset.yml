@@ -5,10 +5,14 @@ on:
     types: [closed]
     branches: [main, master]
 
+concurrency:
+  group: knowledge-vault-${{ github.event.pull_request.base.ref }}
+  cancel-in-progress: false
+
 jobs:
   apply-changeset:
     if: >-
-      github.event.pull_request.merged &&
+      github.event.pull_request.merged == true &&
       startsWith(github.event.pull_request.head.ref, 'knowledge/batch-')
     runs-on: ubuntu-latest
     permissions:
@@ -23,7 +27,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: ether-moon/knowledge-distillery
-          ref: main
+          ref: 5b7981d3a2d904b16f15e9ac2ca68c8d48aebee1  # main as of 2026-04-28
           path: .knowledge-distillery-plugin
 
       - name: Configure git identity
@@ -44,16 +48,18 @@ jobs:
           echo "date=${DATE}" >> "$GITHUB_OUTPUT"
           echo "Batch date: ${DATE}"
 
-      - name: Find and apply changeset
+      - name: Apply changeset
+        env:
+          BATCH_DATE: ${{ steps.batch.outputs.date }}
         run: |
-          GATE=$(find .knowledge-distillery-plugin -name knowledge-gate -path '*/scripts/*' -type f | head -1)
-          if [ -z "$GATE" ]; then
-            echo "::error::knowledge-gate script not found in plugin checkout"
+          GATE=".knowledge-distillery-plugin/scripts/knowledge-gate"
+          if [ ! -f "$GATE" ]; then
+            echo "::error::knowledge-gate script not found at $GATE"
             exit 1
           fi
           chmod +x "$GATE"
 
-          CHANGESET=".knowledge/changesets/batch-${{ steps.batch.outputs.date }}.json"
+          CHANGESET=".knowledge/changesets/batch-${BATCH_DATE}.json"
 
           if [ ! -f "$CHANGESET" ]; then
             echo "::warning::No changeset file found at ${CHANGESET} — skipping"
@@ -71,6 +77,9 @@ jobs:
           "$GATE" _changeset-apply "$CHANGESET"
 
       - name: Commit and push vault.db
+        env:
+          BATCH_DATE: ${{ steps.batch.outputs.date }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           if git diff --quiet .knowledge/vault.db 2>/dev/null; then
             echo "No vault.db changes — skipping commit"
@@ -78,13 +87,18 @@ jobs:
           fi
 
           git add .knowledge/vault.db
-          git commit -m "knowledge: apply batch ${{ steps.batch.outputs.date }} changeset"
-          git push origin ${{ github.event.pull_request.base.ref }}
+          git commit -m "knowledge: apply batch ${BATCH_DATE} changeset"
+          git push origin "$BASE_REF"
 
       - name: Clean up batch artifacts
         env:
           BATCH_DATE: ${{ steps.batch.outputs.date }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
+          # Pull any commits that landed during apply, before staging deletions —
+          # otherwise rebase runs against staged changes and aborts.
+          git pull --rebase origin "$BASE_REF"
+
           CHANGESET=".knowledge/changesets/batch-${BATCH_DATE}.json"
           REPORT=".knowledge/reports/batch-${BATCH_DATE}.md"
           CHANGED=false
@@ -100,7 +114,6 @@ jobs:
           fi
 
           if [ "$CHANGED" = true ]; then
-            git pull --rebase origin ${{ github.event.pull_request.base.ref }}
             git commit -m "knowledge: clean up batch ${BATCH_DATE} artifacts"
-            git push origin ${{ github.event.pull_request.base.ref }}
+            git push origin "$BASE_REF"
           fi
