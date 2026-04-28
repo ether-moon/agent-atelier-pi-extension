@@ -3,6 +3,11 @@
  */
 
 export const DESTRUCTIVE_PATTERNS = [
+  /\bfind\b[^\n]*\s-delete\b/i,
+  /\bfind\b[^\n]*-exec\s+rm\b/i,
+  /\bcurl\b[^\n]*(?:\s-o\s+\S+|\s--output(?:=|\s+)\S+)/i,
+  /\bwget\b[^\n]*\s-O\s+(?!-)/i,
+  /\|\s*(bash|sh|zsh|fish)\b/i,
   /\brm\b/i,
   /\brmdir\b/i,
   /\bmv\b/i,
